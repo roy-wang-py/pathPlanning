@@ -849,4 +849,16 @@ Eigen-3.3/Eigen/QR
 /home/roy/myshare/project/pathPlanning/src/Eigen-3.3/Eigen/QR
 json.hpp
 /home/roy/myshare/project/pathPlanning/src/json.hpp
+spline.h
+/home/roy/myshare/project/pathPlanning/src/spline.h
+
+/home/roy/myshare/project/pathPlanning/src/spline.h
+cstdio
+-
+cassert
+-
+vector
+-
+algorithm
+-
 

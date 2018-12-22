@@ -162,3 +162,4 @@ CMakeFiles/path_planning.dir/src/main.cpp.o
  /home/roy/myshare/project/pathPlanning/src/Eigen-3.3/Eigen/src/plugins/MatrixCwiseUnaryOps.h
  /home/roy/myshare/project/pathPlanning/src/json.hpp
  /home/roy/myshare/project/pathPlanning/src/main.cpp
+ /home/roy/myshare/project/pathPlanning/src/spline.h
