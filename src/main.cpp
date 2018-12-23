@@ -164,6 +164,75 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 
 }
 
+
+#define LANE_WIDTH 4.0
+#define CHANGE_LANE_PUNISHMENT 0
+#define SAFE_DISTANCE 4
+double calCost(double vehicle_s, double vehicle_current_s,double target_s, double target_current_s,double punishment) {
+    /*
+    Cost increases based on distance of intended lane (for planning a lane change) and final lane of trajectory.
+    Cost of being out of goal lane also becomes larger as vehicle approaches goal distance.
+    */
+    double cost;
+    double distance = 0;
+
+    if((vehicle_s-target_s) * (vehicle_current_s-target_current_s) <= 0)
+    {
+        //will crash
+        cost = 1.0;
+        return cost;
+    }
+
+    if(abs(vehicle_s-target_s) < SAFE_DISTANCE)
+    {
+        //too close,can't change lane
+        cost = 1.0;
+        return cost;
+    }
+
+    distance = abs(vehicle_s - target_s);
+
+    if(distance < punishment)
+    {
+        distance = 0;
+    }
+    else
+    {
+        distance -= punishment;
+    }
+    distance = distance / 100;
+    
+    cost = exp(0-distance);
+
+    return cost;
+}
+
+int getLane(float target_d, float lane_width){
+
+    float lane = (target_d/lane_width);
+    if(lane < 0)
+    {
+        return -1;
+    }
+    else if(lane < 1.0)
+    {
+        return 0;
+    }
+    else if(lane < 2.0)
+    {
+        return 1;
+    }
+    else if(lane < 3.0)
+    {
+        return 2;
+    }
+    else
+    {
+        return -1;
+    }
+}
+
+
 int main() {
   uWS::Hub h;
 
@@ -205,7 +274,7 @@ int main() {
   //start lane
   int lane = 1;
   //limit velocity target
-  double ref_vel = 49.5;
+  double ref_vel = 0.0;
 
   h.onMessage([&ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy, &lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
@@ -250,38 +319,116 @@ int main() {
             
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
             int prev_size = previous_path_x.size();
+            double punishment = 10;// punishment of changing lane
+            double current_s = car_s;
+            double current_check_s = 0;
 
             if(prev_size > 0)
             {
+                
                 car_s = end_path_s;
             }
+
+            //find it close and try to slow down to keep dist with the vehicle in the front
             bool too_close = false;
+            //Try to keep the target vehicle's vel to follow the vehicle in the front
+            double target_speed = 49.5;
+            vector<double>lane_cost = {0,0,0};
+            int cur_lane;
+
+            if(prev_size > 0)
+            {
+                cur_lane = getLane(end_path_d, LANE_WIDTH);
+                
+            }
+            else
+            {
+                cur_lane = lane;
+            }
+
 
             //find ref_v to use
             for(int i = 0; i < sensor_fusion.size(); i++)
             {
                 //car is in my lane
                 float d = sensor_fusion[i][6];
+                int target_lane = getLane(d, LANE_WIDTH);
+                
+                double vx = sensor_fusion[i][3];
+                double vy = sensor_fusion[i][4];
+                double check_speed = sqrt(vx*vx + vy*vy);
+                double check_car_s = sensor_fusion[i][5];
+
+                current_check_s = check_car_s;
+                
+                check_car_s += ((double)prev_size*0.02*check_speed);
+
+
+                double cost = 0;
+
+                if(target_lane>=0 && target_lane <=2)
+                {
+
+                    if(target_lane == cur_lane)
+                    {
+                        if(check_car_s > car_s)
+                        {
+                            cost = calCost(car_s, current_s,check_car_s,current_check_s, CHANGE_LANE_PUNISHMENT);
+                            printf("Same lane cost [%f]\r\n",cost);
+                        }
+                    }
+                    //can't change 2 lane
+                    else if(abs(cur_lane-target_lane)>1)
+                    {
+                        lane_cost[target_lane] = 1;
+                    }
+                    else 
+                    {
+                        //cal cost and select lane
+                        cost = calCost(car_s, current_s,check_car_s,current_check_s, 0);
+
+                        
+                    }
+                    
+                    if(lane_cost[target_lane] < cost)
+                    {
+                        lane_cost[target_lane] = cost;    
+                    }
+                }
+                
+                
                 if(d < (2+4*lane+2) && d>(2+4*lane-2))
                 {
-                    double vx = sensor_fusion[i][3];
-                    double vy = sensor_fusion[i][4];
-                    double check_speed = sqrt(vx*vx + vy*vy);
-                    double check_car_s = sensor_fusion[i][5];
-
-                    check_car_s += ((double)prev_size*0.02*check_speed);
 
                     if(check_car_s > car_s && (check_car_s - car_s)<30)
                     {
-                        //ref_vel = 29.5;
-                        too_close = true;
+                           too_close = true;
+                        
                     }
+                   
                 }
             }
 
+            printf("************************************\r\n");
+            printf("Lane cose: %f, %f, %f\r\n",lane_cost[0],lane_cost[1],lane_cost[2]);
+            printf("************************************\r\n");
+
             if(too_close)
             {
-                ref_vel -= 0.224;
+                vector<double>::iterator best_cost = min_element(begin(lane_cost), end(lane_cost));
+               
+                int change_lane = distance(begin(lane_cost), best_cost);
+                printf("best cost  lane[%d]\r\n", change_lane);
+
+                if(lane == change_lane || abs(lane_cost[lane]-lane_cost[change_lane])<0.01 || lane_cost[change_lane] > 0.9)
+                {
+                   ref_vel -= 0.224;                  
+                }
+                else
+                {
+                    lane = change_lane;
+                }
+                printf("select lane[%d]\r\n", lane);
             }
             else if(ref_vel<49.5)
             {
@@ -297,8 +444,6 @@ int main() {
             
             if(prev_size < 2)
             {
-                //double prev_car_x = car_x - car_speed*0.2*cos(car_yaw);
-                //double prev_car_y = car_y - car_speed*0.2*sin(car_yaw);
                 double prev_car_x = car_x - cos(car_yaw);
                 double prev_car_y = car_y - sin(car_yaw);
 
