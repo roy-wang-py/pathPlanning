@@ -420,12 +420,16 @@ int main() {
                 int change_lane = distance(begin(lane_cost), best_cost);
                 printf("best cost  lane[%d]\r\n", change_lane);
 
-                if(lane == change_lane || abs(lane_cost[lane]-lane_cost[change_lane])<0.01 || lane_cost[change_lane] > 0.9)
+                if(lane == change_lane || abs(lane_cost[lane]-lane_cost[change_lane])<0.01 || lane_cost[change_lane] > 0.8)
                 {
                    ref_vel -= 0.224;                  
                 }
                 else
                 {
+                    if(lane_cost[change_lane] > 0.8)
+                    {
+                        ref_vel -= 0.224; 
+                    }
                     lane = change_lane;
                 }
                 printf("select lane[%d]\r\n", lane);
