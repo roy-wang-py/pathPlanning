@@ -168,11 +168,21 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 #define LANE_WIDTH 4.0
 #define CHANGE_LANE_PUNISHMENT 0
 #define SAFE_DISTANCE 4
+
+#define DEBUG_SWITCH 1
+
+/******************************************************************************
+    cal target cost by disance
+        input:
+            vehicle_s: vehicle's latest predict s 
+            vehicle_current_s: vehicle's current s
+            target_s: target vehicle's latest predict s 
+            target_current_s: target vehicle's current s
+            punishment: punish to the target vehicle
+        ouput:
+            cost, it may cause crash when the cost is too large
+*******************************************************************************/
 double calCost(double vehicle_s, double vehicle_current_s,double target_s, double target_current_s,double punishment) {
-    /*
-    Cost increases based on distance of intended lane (for planning a lane change) and final lane of trajectory.
-    Cost of being out of goal lane also becomes larger as vehicle approaches goal distance.
-    */
     double cost;
     double distance = 0;
 
@@ -185,13 +195,14 @@ double calCost(double vehicle_s, double vehicle_current_s,double target_s, doubl
 
     if(abs(vehicle_s-target_s) < SAFE_DISTANCE)
     {
-        //too close,can't change lane
+        //too close,can't change lane, otherise it may cause crash
         cost = 1.0;
         return cost;
     }
 
     distance = abs(vehicle_s - target_s);
 
+    //add punishment
     if(distance < punishment)
     {
         distance = 0;
@@ -200,6 +211,7 @@ double calCost(double vehicle_s, double vehicle_current_s,double target_s, doubl
     {
         distance -= punishment;
     }
+
     distance = distance / 100;
     
     cost = exp(0-distance);
@@ -207,6 +219,7 @@ double calCost(double vehicle_s, double vehicle_current_s,double target_s, doubl
     return cost;
 }
 
+//cal lane number by d
 int getLane(float target_d, float lane_width){
 
     float lane = (target_d/lane_width);
@@ -314,28 +327,31 @@ int main() {
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
           	json msgJson;
-
-            //prev path size
             
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
+          	//prev path size
             int prev_size = previous_path_x.size();
-            double punishment = 10;// punishment of changing lane
+            // punishment to changing lane£¬ when find it too close to the vehicle in front
+            double punishment = 10;
+            //Current s of the vehicle
             double current_s = car_s;
+            //Current s of the target vehicle
             double current_check_s = 0;
 
             if(prev_size > 0)
             {
-                
+                //using prev path to predict new path
                 car_s = end_path_s;
             }
 
-            //find it close and try to slow down to keep dist with the vehicle in the front
+            //find it close and try to slow down or to change lanes
             bool too_close = false;
-            //Try to keep the target vehicle's vel to follow the vehicle in the front
-            double target_speed = 49.5;
+            //cost of each lane
             vector<double>lane_cost = {0,0,0};
+            //current lane that the vehicle runs on
             int cur_lane;
 
+            //get the lane that the vehicle runs on
             if(prev_size > 0)
             {
                 cur_lane = getLane(end_path_d, LANE_WIDTH);
@@ -347,10 +363,9 @@ int main() {
             }
 
 
-            //find ref_v to use
+            //check target vehicles, and cal cost of each lane
             for(int i = 0; i < sensor_fusion.size(); i++)
             {
-                //car is in my lane
                 float d = sensor_fusion[i][6];
                 int target_lane = getLane(d, LANE_WIDTH);
                 
@@ -368,19 +383,20 @@ int main() {
 
                 if(target_lane>=0 && target_lane <=2)
                 {
+                    //valid lane number
 
                     if(target_lane == cur_lane)
                     {
+                        //the target vehicle runs on the same lane
                         if(check_car_s > car_s)
                         {
                             cost = calCost(car_s, current_s,check_car_s,current_check_s, CHANGE_LANE_PUNISHMENT);
-                            printf("Same lane cost [%f]\r\n",cost);
                         }
                     }
-                    //can't change 2 lane
-                    else if(abs(cur_lane-target_lane)>1)
+                    //can't change 2 lanes, so make it cost 1.0(max cost value)
+                    else if(abs(cur_lane-target_lane)>1.0)
                     {
-                        lane_cost[target_lane] = 1;
+                        lane_cost[target_lane] = 1.0;
                     }
                     else 
                     {
@@ -389,7 +405,8 @@ int main() {
 
                         
                     }
-                    
+
+                    //select the max cost as the lane's final cost
                     if(lane_cost[target_lane] < cost)
                     {
                         lane_cost[target_lane] = cost;    
@@ -399,43 +416,56 @@ int main() {
                 
                 if(d < (2+4*lane+2) && d>(2+4*lane-2))
                 {
+                    //check if the vehicle is too close to the target vehicle in front
 
                     if(check_car_s > car_s && (check_car_s - car_s)<30)
                     {
-                           too_close = true;
+                        //it's too close    
+                        too_close = true;
                         
                     }
                    
                 }
             }
 
-            printf("************************************\r\n");
-            printf("Lane cose: %f, %f, %f\r\n",lane_cost[0],lane_cost[1],lane_cost[2]);
-            printf("************************************\r\n");
+            if(DEBUG_SWITCH)
+            {
+                printf("************************************\r\n");
+                printf("Lane cose: %f, %f, %f\r\n",lane_cost[0],lane_cost[1],lane_cost[2]);
+                printf("************************************\r\n");
+            }
 
             if(too_close)
             {
+                //when it's too close, we should select a lane which has the min cost
                 vector<double>::iterator best_cost = min_element(begin(lane_cost), end(lane_cost));
                
                 int change_lane = distance(begin(lane_cost), best_cost);
-                printf("best cost  lane[%d]\r\n", change_lane);
+   
 
-                if(lane == change_lane || abs(lane_cost[lane]-lane_cost[change_lane])<0.01 || lane_cost[change_lane] > 0.8)
+                if(lane == change_lane || (lane_cost[lane]-lane_cost[change_lane])<0.025 || lane_cost[change_lane] > 0.8)
                 {
-                   ref_vel -= 0.224;                  
+                    //if the min cost is almost the same as current lane's cost, the vehicle would keep lane and slow down.
+                    ref_vel -= 0.224;                  
                 }
                 else
                 {
-                    if(lane_cost[change_lane] > 0.8)
+                    //decide to chane lane
+                    if(lane_cost[change_lane] > 0.72)
                     {
+                        //slow down if the target lane's cost is too much.
                         ref_vel -= 0.224; 
                     }
                     lane = change_lane;
                 }
-                printf("select lane[%d]\r\n", lane);
+                if(DEBUG_SWITCH)
+                {
+                    printf("select lane[%d]\r\n", lane);
+                }
             }
             else if(ref_vel<49.5)
             {
+                //it is safe, just speed up to the limit speed
                 ref_vel += 0.224;
             }
 
@@ -448,6 +478,7 @@ int main() {
             
             if(prev_size < 2)
             {
+                //no prev path, try to cal it
                 double prev_car_x = car_x - cos(car_yaw);
                 double prev_car_y = car_y - sin(car_yaw);
 
@@ -459,6 +490,7 @@ int main() {
             }
             else
             {
+                //get 2 prev path point
                 ref_x = previous_path_x[prev_size-1];
                 ref_y = previous_path_y[prev_size-1];
 
@@ -476,6 +508,7 @@ int main() {
                 
             }
 
+            //cal sample point
             vector<double> next_wp0 = getXY(car_s+30, 2+4*lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
             vector<double> next_wp1 = getXY(car_s+60, 2+4*lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
             vector<double> next_wp2 = getXY(car_s+90, 2+4*lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
@@ -506,6 +539,7 @@ int main() {
           	vector<double> next_x_vals;
           	vector<double> next_y_vals;
 
+            //push the prev path
             for(int i=0; i<previous_path_x.size(); i++)
             {
                 next_x_vals.push_back(previous_path_x[i]);
@@ -518,6 +552,7 @@ int main() {
 
             double x_add_on = 0;
 
+            //use spline to cal path base
             for(int i=0; i<50-previous_path_x.size(); i++)
             {
                 double N = target_dist/(0.02*ref_vel/2.24);
@@ -537,7 +572,8 @@ int main() {
                 next_x_vals.push_back(points_x);
                 next_y_vals.push_back(points_y);
             }
-            
+
+            //finishd predict path
           	msgJson["next_x"] = next_x_vals;
           	msgJson["next_y"] = next_y_vals;
 
