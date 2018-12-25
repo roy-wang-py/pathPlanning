@@ -60,6 +60,31 @@ the path has processed since last time.
 
 2. There will be some latency between the simulator running and the path planner returning a path, with optimized code usually its not very long maybe just 1-3 time steps. During this delay the simulator will continue using points that it was last given, because of this its a good idea to store the last points you have used so you can have a smooth transition. previous_path_x, and previous_path_y can be helpful for this transition since they show the last points given to the simulator controller with the processed points already removed. You would either return a path that extends this previous path or make sure to create a new path that has a smooth transition with this last path.
 
+## Model Documentation
+
+In order to driver the vehicle in the highway, the vehicle would not change lane until found it too close to the car in front. Then the vehicle calculate all three lanes' cost, and select a lane. When the cost of the selected lane is too large, larger than 0.72, the vehicle will slow down, otherwise it will keep its velocity.When the vehicle found it safe, far away from the car in front, try to speed up to the limit velocity 50.(the vehicle mean our vehicle;the target vehicle means other vehicles on the road)
+
+The implementation is summarized in the following 4 steps:
+1.Check sensor_fusion data, and calculate three lanes' cost.(line 367 -- line 492)
+    1)init 2 lanes' cost by 1.0;(line 350)
+    2)Get the lane of the vehicle(cur_lane), and the lane of the target vehicle(target_lane);(using func "int getLane(float target_d, float lane_width)")(line 355 -- line 363, line 370)
+    3)If the vehicle and the target vehicle are on the same lane, only calculate cost of the target vehicle in front of our vehicle;(line 388 -- line 395)
+    4)If there is a lane between the vehicle and the target vehicle, cost should be 1.0(max cost value), as our vehicle can't change 2 lanes once;(line 397 -- line 400)
+    5)If the target vehicle is on the adjacent lane, calculate the cost;(line 401 -- line 407)
+    6)Take the max cost of the target vehicle on each lane as its final cost; (line 410 -- line 413)
+    7)Check if the vehicle is too close to the target vehicle in front.(line 417 -- line 428)
+    
+2.If too close to the vehicle in front, select best lane(the one with the lowest cost).(line 438 -- line 465)
+    1)if the best lane is the current lane, or best lane's cost is almost same as current lane, or the best lane's cost is too large,the the vehicle would keep its lane;(line 466 -- line 450)
+    2)Otherwise, the vehicle would change to the best lane, but if cost is too large, the vehicle also needs to slow down;(line 451 -- line 460)
+    
+3.Otherwise, try to speed up to the limit velocity 50.(line 466 -- line 470)
+    
+4.Based on the lane selected and velocity, Produce the new path.(line 472 -- line 574)
+    1)Build spline to produce smooth new path;(line 479 -- line 536)
+    2)Push back the previous path;(line 543 -- line 547)
+    3)Use spline to produce the new path;(line 556 -- line 574)
+
 ## Tips
 
 A really helpful resource for doing this project and creating smooth trajectories was using http://kluge.in-chemnitz.de/opensource/spline/, the spline function is in a single hearder file is really easy to use.
